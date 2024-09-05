@@ -1,0 +1,16 @@
+[package]
+name = "jungle_gem"
+version = "1.0.0"
+authors = []
+
+[addresses]
+jungle_gem = "b64e389e39bff65ce0fe1502ff69ed06caabeb1a26998e316dc8f32823f158a8"
+jungle_gem_default_admin = "a3809bb9601812f288b89b95eeaa0e1aad8da255ba84d6539d82ead86495e633"
+jungle_gem_dev = "a3809bb9601812f288b89b95eeaa0e1aad8da255ba84d6539d82ead86495e633"
+null_address = "0x0"
+
+[dependencies.AptosFramework]
+git = "https://github.com/aptos-labs/aptos-core.git"
+rev = "mainnet"
+subdir = "aptos-move/framework/aptos-framework"
+
