@@ -4,21 +4,23 @@ import {
   getContractDirectory,
   serializePackage,
 } from './helper/buildPackage';
-import { CONTRACTS } from './const';
+
+import * as dotenv from 'dotenv';
+dotenv.config();
 
 const network = 'TESTNET';
 
-const contract = CONTRACTS[network]['jungle_run'];
-
 (async () => {
   try {
+    const contract = process.env.APTOS_CONTRACT_ADDRESS;
+    const contractModuleName = process.env.APTOS_CONTRACT_MODULE_NAME;
     const packageBuild = buildPackage(getContractDirectory());
     console.log('Package build successfully.');
     const serialized = serializePackage(packageBuild);
     console.log('Package serialized successfully.');
     const hash = await callEntryFunc(
       network,
-      `${contract}::assets`,
+      `${contract}::${contractModuleName}`,
       'upgrade_contract',
       [],
       [serialized.meta, serialized.bytecodes],

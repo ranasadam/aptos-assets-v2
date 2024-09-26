@@ -45,4 +45,16 @@ module jungle_gem::math {
     public fun mul_to_u128(x: u64, y: u64): u128 {
         (x as u128) * (y as u128)
     }
+
+    /// Multiple u64 raise to power u8, e.g. ((`base` ^ `exp`) as u64).
+    public fun pow(base: u64, exp: u8): u64 {
+        let result = 1u64;
+        loop {
+            if (exp & 1 == 1) { result = result * base; };
+            exp = exp >> 1;
+            base = base * base;
+            if (exp == 0u8) { break };
+        };
+        result
+    }
 }

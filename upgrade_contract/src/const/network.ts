@@ -21,7 +21,7 @@ const MAINNET = {
   },
   aptos: {
     rpc: 'https://fullnode.mainnet.aptoslabs.com/v1',
-    key: getEnvVar('APTOS_MAINNET'),
+    key: getEnvVar('APTOS_PRIVATE_KEY'),
   },
 };
 
@@ -32,7 +32,7 @@ const TESTNET = {
   },
   aptos: {
     rpc: 'https://fullnode.testnet.aptoslabs.com/v1',
-    key: getEnvVar('APTOS_TESTNET'),
+    key: getEnvVar('APTOS_PRIVATE_KEY'),
   },
 };
 
@@ -44,7 +44,7 @@ const DEVNET = {
 
   aptos: {
     rpc: 'https://fullnode.devnet.aptoslabs.com/v1',
-    key: getEnvVar('APTOS_DEVNET'),
+    key: getEnvVar('APTOS_PRIVATE_KEY'),
   },
 };
 

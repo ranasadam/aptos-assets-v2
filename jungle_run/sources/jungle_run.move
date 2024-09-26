@@ -1,4 +1,4 @@
-module jungle_run::assets {
+module jungle_run::jungle_run {
     use std::option;
     use std::option::Option;
     use std::signer;
@@ -18,6 +18,7 @@ module jungle_run::assets {
     use aptos_framework::object::{Object, TransferRef};
     use aptos_framework::resource_account;
     use aptos_std::string_utils::{to_string};
+    use aptos_framework::timestamp;
 
     use aptos_token_objects::collection;
     use aptos_token_objects::collection::Collection;
@@ -34,6 +35,10 @@ module jungle_run::assets {
     const ROYALITY_NUMERATOR: u64 = 200;
     const ROYALITY_DENOMINATOR: u64 = 10000;
 
+    // Action contants
+    const INITIAL_MAX_ACTIONS: u64 = 100;
+    const TOTAL_COOL_DOWN_TIME: u64 = 20 * 60;
+
     // Error codes
     const ERROR_ONLY_SUPER_ADMIN: u64 = 0;
     const ERROR_ONLY_ADMIN: u64 = 1;
@@ -48,11 +53,11 @@ module jungle_run::assets {
     const ERROR_DIVIDE_BY_ZERO: u64 = 10;
     const ERROR_NOT_OWNER: u64 = 11;
     const ERROR_TOKEN_NOT_CLAIMABLE: u64 = 12;
-    const ERROR_CHEST_NOT_EXISTS: u64 = 13;
     const ERROR_WRONG_COLLECTION: u64 = 14;
     const ERROR_NO_TRANSFER_REF: u64 = 15;
     const ERROR_INVENTORY_NOT_EXISTS: u64 = 16;
-
+    const ERROR_ALL_ACTION_CONSUMED: u64 = 17;
+    const ERROR_ACTION_PACK_ALREADY_EXISTS: u64 = 18;
 
     // The avatar token collection name
     const COLLECTION_NAME: vector<u8> = b"Jungle Run Avatars";
@@ -60,13 +65,6 @@ module jungle_run::assets {
     const COLLECTION_DESCRIPTION: vector<u8> = b"A 3D collection of unlockable and playable characters within Jungle Run, these characters are tradable unless soul-bound, they are dynamic and can be customized and upgraded as users level up.";
     // The avatar token collection URI
     const COLLECTION_URI: vector<u8> = b"Avatar Collection URI";
-
-    // The chest token collection name
-    const CHEST_COLLECTION_NAME: vector<u8> = b"Roarlinko Chests";
-    // The chest token collection description
-    const CHEST_COLLECTION_DESCRIPTION: vector<u8> = b"Chests are earned by playing the Proud Lions: Roarlinko game. Each chest varies in the number of rewards it produces, the higher the tier of the chest, the higher the rewards.";
-    // The chest token collection URI
-    const CHEST_COLLECTION_URI: vector<u8> = b"https://proudlionsclub.mypinata.cloud/ipfs/QmaMyGHkkkqArpfczz1CKdmevNoqrj2tPXbUrT7fMZedpw";
 
     struct ContractData has key {
         signer_cap: account::SignerCapability,
@@ -86,14 +84,14 @@ module jungle_run::assets {
         // Smart table to store avatar of different type
         avatars: SmartTable<String, AvatarData>,
 
-        // Smart table to store chest of different type
-        chests: SmartTable<String, ChestData>,
-
         // Smart table to store users
         users: SmartTable<String, UserData>,
 
         // Smart table to owner of special nft that will get royality
         royality_owners: SmartTable<address, u64>,
+
+        // Smart table to store action packs
+        action_packs: SmartTable<String, ActionData>,
 
         //events to emit on every action
         user_created_event: EventHandle<CreateUserEvent>,
@@ -110,6 +108,10 @@ module jungle_run::assets {
         email: String,
         stake_tokens: u64,
         score: u64,
+        max_actions: u64,
+        remaining_actions: u64,
+        last_cool_down_time: u64,
+        cool_down_timer: u64,
         avatar_score: vector<AvatarScore>,
         inventory: vector<String>
     }
@@ -136,10 +138,10 @@ module jungle_run::assets {
         value: String,
     }
 
-    struct ChestData has copy, store, drop {
+    struct ActionData has copy, store, drop {
         name: String,
-        description: String,
-        token_uri: String,
+        price: u64,
+        action_received: u64,
     }
 
     //Events
@@ -217,12 +219,6 @@ module jungle_run::assets {
         property_mutator_ref: property_map::MutatorRef,
     }
 
-    #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
-    struct ChestToken has key {
-        mutator_ref: token::MutatorRef,
-        burn_ref: token::BurnRef,
-    }
-
     fun init_module(sender: &signer) {
         let signer_cap = resource_account::retrieve_resource_account_cap(sender, DEV);
         let resource_signer = account::create_signer_with_capability(&signer_cap);
@@ -236,8 +232,8 @@ module jungle_run::assets {
             claimed_soul_bound_addresses: vector::empty<address>(),
             whitelist_collection: vector::empty<address>(),
             avatars: smart_table::new<String, AvatarData>(),
-            chests: getChestsData(),
             users: smart_table::new<String, UserData>(),
+            action_packs: smart_table::new<String, ActionData>(),
             royality: coin::zero<AptosCoin>(),
             royality_owners: smart_table::new<address, u64>(),
             user_created_event: account::new_event_handle<CreateUserEvent>(sender),
@@ -246,7 +242,6 @@ module jungle_run::assets {
             token_property_event: account::new_event_handle<TokenPropertyEvent>(sender),
         });
         create_avatar_collection(&resource_signer);
-        create_chest_collection(&resource_signer);
     }
 
     public entry fun set_super_admin(sender: &signer, new_admin: address) acquires ContractData {
@@ -711,74 +706,6 @@ module jungle_run::assets {
         token::set_description(&avatar_token.mutator_ref, new_decs);
     }
 
-    public entry fun mint_chest(
-        user: &signer,
-        chest_type: String,
-        receiver_address: address,
-    ) acquires ContractData {
-        let sender_addres = signer::address_of(user);
-        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
-
-        //only admin can perform this operation
-        assert!(vector::contains(&mut contract_data.admin, &sender_addres), ERROR_ONLY_ADMIN);
-
-        //check if chest type not exists
-        assert!(smart_table::contains(&contract_data.chests, chest_type), ERROR_CHEST_NOT_EXISTS);
-
-
-        let chest_data = smart_table::borrow(&contract_data.chests, chest_type);
-        let resource_signer = account::create_signer_with_capability(&contract_data.signer_cap);
-
-        // The collection name is used to locate the collection object and to create a new token object.
-        let collection = string::utf8(CHEST_COLLECTION_NAME);
-
-        // Creates the chest token, and get the constructor ref of the token. The constructor ref
-        // is used to generate the refs of the token.
-        let name_str = chest_data.name;
-        string::append(&mut name_str, string::utf8(b" #"));
-        let constructor_ref = token::create_numbered_token(
-            &resource_signer,
-            collection,
-            chest_data.description,
-            name_str,
-            string::utf8(b""),
-            option::none(),
-            chest_data.token_uri,
-        );
-
-        // Generates the object signer and the refs.  The refs are used to manage the token.
-        let object_signer = object::generate_signer(&constructor_ref);
-        let transfer_ref = object::generate_transfer_ref(&constructor_ref);
-        let mutator_ref = token::generate_mutator_ref(&constructor_ref);
-        let burn_ref = token::generate_burn_ref(&constructor_ref);
-
-        // Transfers the token to the address
-        let linear_transfer_ref = object::generate_linear_transfer_ref(&transfer_ref);
-        object::transfer_with_ref(linear_transfer_ref, receiver_address);
-
-        // Publishes the ChestToken resource with the refs.
-        let chest_token = ChestToken {
-            mutator_ref,
-            burn_ref,
-        };
-
-        move_to(&object_signer, chest_token);
-    }
-
-    public entry fun burn_chest(user: &signer, token: Object<ChestToken>) acquires ChestToken, ContractData {
-        let sender_addres = signer::address_of(user);
-        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
-        //only admin can perform this operation
-        assert!(vector::contains(&mut contract_data.admin, &sender_addres), ERROR_ONLY_ADMIN);
-
-        let chest_token = move_from<ChestToken>(object::object_address(&token));
-        let ChestToken {
-            mutator_ref: _,
-            burn_ref,
-        } = chest_token;
-
-        token::burn(burn_ref);
-    }
 
 
     public entry fun create_user(
@@ -806,6 +733,10 @@ module jungle_run::assets {
             username,
             stake_tokens: 0,
             score: 0,
+            remaining_actions: INITIAL_MAX_ACTIONS,
+            max_actions: INITIAL_MAX_ACTIONS,
+            last_cool_down_time: 0,
+            cool_down_timer: TOTAL_COOL_DOWN_TIME,
             avatar_score: vector::empty(),
             inventory: vector::empty(),
         };
@@ -962,7 +893,12 @@ module jungle_run::assets {
         );
     }
 
-    public entry fun update_user_inventory(user: &signer, email: String, old_inventory_item: String, inventory_item: String) acquires ContractData {
+    public entry fun update_user_inventory(
+        user: &signer,
+        email: String,
+        old_inventory_item: String,
+        inventory_item: String
+    ) acquires ContractData {
         //check authentication of admin
         authorize_only_admin(user);
 
@@ -1078,6 +1014,121 @@ module jungle_run::assets {
         );
     }
 
+    // This method will update all user action and will be called periodically from backend
+    public entry fun update_user_actions(
+        user: &signer,
+    ) acquires ContractData {
+        //check authentication of admin
+        authorize_only_admin(user);
+
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+
+        let users = smart_table::to_simple_map(&mut contract_data.users);
+        let user_values = simple_map::values(&mut users);
+        let length = vector::length(&user_values);
+        let i = 0;
+
+        while (i < length) {
+            let user = *vector::borrow(&user_values, i);
+
+            let user_data = smart_table::borrow_mut(&mut contract_data.users, user.email);
+            if (user_data.last_cool_down_time == 0) {
+                continue
+            } else {
+                let now_sec = timestamp::now_seconds();
+                if (now_sec - user_data.last_cool_down_time > user_data.cool_down_timer / 2) {
+                    user_data.remaining_actions = user_data.max_actions / 2;
+                };
+                if (now_sec - user_data.last_cool_down_time > user_data.cool_down_timer) {
+                    user_data.remaining_actions = user_data.max_actions;
+                    user_data.last_cool_down_time = 0;
+                };
+            };
+
+            i = i + 1;
+        };
+    }
+
+    public entry fun consume_user_action(
+        user: &signer,
+        email: String,
+    ) acquires ContractData {
+        //check authentication of admin
+        authorize_only_admin(user);
+
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+
+        let user_data = smart_table::borrow_mut(&mut contract_data.users, email);
+        assert!(user_data.remaining_actions != 0, ERROR_ALL_ACTION_CONSUMED);
+
+        user_data.remaining_actions = user_data.remaining_actions - 1;
+        if (user_data.remaining_actions == 0) {
+            user_data.last_cool_down_time = timestamp::now_seconds();
+        };
+
+        emit_event<UpdateUserEvent>(
+            &mut contract_data.user_updated_event,
+            UpdateUserEvent {
+                user_data: create(user_data)
+            }
+        );
+    }
+
+    public entry fun add_action_pack(
+        sender: &signer,
+        action_type: String,
+        action_name: String,
+        action_price: u64,
+        action_received: u64
+    ) acquires ContractData {
+        let sender_addr = signer::address_of(sender);
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+
+        //only super admin can assign new admin
+        assert!(sender_addr == contract_data.super_admin, ERROR_ONLY_SUPER_ADMIN);
+
+        //check if avatar already exists
+        assert!(!smart_table::contains(&contract_data.action_packs, action_type), ERROR_ACTION_PACK_ALREADY_EXISTS);
+
+        let data = ActionData {
+            name: action_name,
+            price: action_price,
+            action_received
+        };
+
+        smart_table::add(&mut contract_data.action_packs, action_type, data);
+    }
+
+
+    public entry fun buy_action_pack(
+        user: &signer,
+        action_type: String,
+        email: String,
+    ) acquires ContractData {
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+
+        //check if user exists
+        let is_already_exists = smart_table::contains(&contract_data.users, email);
+        assert!(is_already_exists, ERROR_USER_NOT_EXISTS);
+
+        //check if action pack not exists
+        assert!(smart_table::contains(&contract_data.action_packs, action_type), ERROR_ACTION_PACK_ALREADY_EXISTS);
+
+        let action_data = *smart_table::borrow(&mut contract_data.action_packs, action_type);
+        let user_data = smart_table::borrow_mut(&mut contract_data.users, email);
+
+        transfer_coins<AptosCoin>(user, contract_data.super_admin, action_data.price);
+        user_data.max_actions = user_data.max_actions + action_data.action_received;
+
+        emit_event<UpdateUserEvent>(
+            &mut contract_data.user_updated_event,
+            UpdateUserEvent {
+                user_data: create(user_data)
+            }
+        );
+    }
+
+
     #[view]
     public fun get_avatar(
         avatar_type: String
@@ -1112,40 +1163,14 @@ module jungle_run::assets {
         )
     }
 
-    #[view]
-    public fun get_chest(
-        chest_type: String
-    ): (String, String, String) acquires ContractData {
-        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
 
-        //check if chest exists
-        let is_already_exists = smart_table::contains(&contract_data.chests, chest_type);
-        assert!(is_already_exists, ERROR_CHEST_NOT_EXISTS);
 
-        let chest_data = smart_table::borrow_mut(&mut contract_data.chests, chest_type);
-        (
-            chest_data.name,
-            chest_data.description,
-            chest_data.token_uri,
-        )
-    }
 
-    #[view]
-    public fun get_chest_types(): ( vector<String>) acquires ContractData {
-        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
-
-        let chests = smart_table::to_simple_map(&mut contract_data.chests);
-        let chest_keys = simple_map::keys(&mut chests);
-
-        (
-            chest_keys
-        )
-    }
 
     #[view]
     public fun get_user(
         email: String
-    ): (address, address, address, String, u64, u64, vector<String>, vector<AvatarScore>) acquires ContractData {
+    ): (address, address, address, String, u64, u64, u64, u64, u64, u64, vector<String>, vector<AvatarScore>) acquires ContractData {
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
 
         //check if user exists
@@ -1161,6 +1186,10 @@ module jungle_run::assets {
             user_data.username,
             user_data.stake_tokens,
             user_data.score,
+            user_data.remaining_actions,
+            user_data.max_actions,
+            user_data.last_cool_down_time,
+            user_data.cool_down_timer,
             user_data.inventory,
             user_data.avatar_score
         )
@@ -1208,6 +1237,10 @@ module jungle_run::assets {
             username: user_data.username,
             stake_tokens: user_data.stake_tokens,
             score: user_data.score,
+            remaining_actions: user_data.remaining_actions,
+            max_actions: user_data.max_actions,
+            cool_down_timer: user_data.cool_down_timer,
+            last_cool_down_time: user_data.last_cool_down_time,
             avatar_score: user_data.avatar_score,
             inventory: user_data.inventory,
         }
@@ -1306,20 +1339,7 @@ module jungle_run::assets {
         );
     }
 
-    fun create_chest_collection(user: &signer) {
-        let description = string::utf8(CHEST_COLLECTION_DESCRIPTION);
-        let name = string::utf8(CHEST_COLLECTION_NAME);
-        let uri = string::utf8(CHEST_COLLECTION_URI);
 
-        // Creates the collection with unlimited supply and without establishing any royalty configuration.
-        collection::create_unlimited_collection(
-            user,
-            description,
-            name,
-            option::none(),
-            uri,
-        );
-    }
 
     fun authorize_only_admin(user: &signer) acquires ContractData {
         let sender_addres = signer::address_of(user);
@@ -1376,45 +1396,7 @@ module jungle_run::assets {
         };
     }
 
-    fun getChestsData(): SmartTable<String, ChestData> {
-        let chests = smart_table::new<String, ChestData>();
-        smart_table::add(&mut chests, string::utf8(b"SAPPHIRE"), ChestData {
-            name: string::utf8(b"Sapphire Chest"),
-            description: string::utf8(b"This chest can only be acquired from the Lioness Ritual"),
-            token_uri: string::utf8(
-                b"https://proudlionsclub.mypinata.cloud/ipfs/QmZUN5YxeuDXNZpZ1shxhLmQovaQbBJyhh4zCQHXyUkVu4/Sapphire%20%282%29.png"
-            ),
-        });
-        smart_table::add(&mut chests, string::utf8(b"DIAMOND"), ChestData {
-            name: string::utf8(b"Diamond Chest"),
-            description: string::utf8(b"This chest pays the highest multiplier of rewards"),
-            token_uri: string::utf8(
-                b"https://proudlionsclub.mypinata.cloud/ipfs/QmZUN5YxeuDXNZpZ1shxhLmQovaQbBJyhh4zCQHXyUkVu4/Bronze.gif"
-            ),
-        });
-        smart_table::add(&mut chests, string::utf8(b"GOLD"), ChestData {
-            name: string::utf8(b"Gold Chest"),
-            description: string::utf8(b"This chest pays out a 3X multiplier of rewards"),
-            token_uri: string::utf8(
-                b"https://proudlionsclub.mypinata.cloud/ipfs/QmZUN5YxeuDXNZpZ1shxhLmQovaQbBJyhh4zCQHXyUkVu4/Gold.gif"
-            ),
-        });
-        smart_table::add(&mut chests, string::utf8(b"SILVER"), ChestData {
-            name: string::utf8(b"Silver Chest"),
-            description: string::utf8(b"This chest pays out a 2X multiplier of rewards"),
-            token_uri: string::utf8(
-                b"https://proudlionsclub.mypinata.cloud/ipfs/QmZUN5YxeuDXNZpZ1shxhLmQovaQbBJyhh4zCQHXyUkVu4/Silver.gif"
-            ),
-        });
-        smart_table::add(&mut chests, string::utf8(b"BRONZE"), ChestData {
-            name: string::utf8(b"Bronze Chest"),
-            description: string::utf8(b"This chest pays out 1X multiplier of rewards"),
-            token_uri: string::utf8(
-                b"https://proudlionsclub.mypinata.cloud/ipfs/QmZUN5YxeuDXNZpZ1shxhLmQovaQbBJyhh4zCQHXyUkVu4/Bronze.gif"
-            ),
-        });
-        chests
-    }
+
 
     inline fun has_record(
         avatar_scores: &vector<AvatarScore>,

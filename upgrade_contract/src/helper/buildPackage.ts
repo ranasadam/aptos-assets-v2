@@ -3,6 +3,8 @@ import fs from 'fs';
 import { BCS } from 'aptos';
 import sha3 from 'js-sha3';
 import path from 'path';
+import * as dotenv from 'dotenv';
+dotenv.config();
 
 interface Package {
   meta_file: string;
@@ -77,5 +79,7 @@ export const serializePackage = (p: Package): PackageBCS => {
 
 export function getContractDirectory(): string {
   const res = process.cwd().split(path.sep);
-  return `${res.slice(0, res.length - 1).join('/')}/jungle_run`;
+  return `${res.slice(0, res.length - 1).join('/')}${
+    process.env.APTOS_CONTRACT_DIRECTORY
+  }`;
 }
