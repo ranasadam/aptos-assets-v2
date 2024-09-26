@@ -680,30 +680,34 @@ module jungle_gem::jungle_gem {
 
 
     public entry fun convert_chest(
-        user: &signer,
+        admin: &signer,
+        owner: address,
         bronze_chest: Object<ChestToken>,
         silver_chest: Object<ChestToken>,
         diamond_chest: Object<ChestToken>,
         gold_chest: Object<ChestToken>
     ) acquires ChestToken, ContractData {
-        let sender_addres = signer::address_of(user);
+        let admin_address = signer::address_of(admin);
 
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
 
+        //only admin can perform this operation
+        assert!(vector::contains(&mut contract_data.admin, &admin_address), ERROR_ONLY_ADMIN);
+
         //checks if signer is owner of chest tokens and provide all required type of chests
-        assert!(object::is_owner(bronze_chest, sender_addres), ERROR_NOT_OWNER);
+        assert!(object::is_owner(bronze_chest, owner), ERROR_NOT_OWNER);
         let bronze_type = property_map::read_string(&bronze_chest, &string::utf8(CHEST_TYPE_KEY));
         assert!(bronze_type == string::utf8(BRONZE), ERROR_BRONZE_CHEST_REQUIRED);
 
-        assert!(object::is_owner(silver_chest, sender_addres), ERROR_NOT_OWNER);
+        assert!(object::is_owner(silver_chest, owner), ERROR_NOT_OWNER);
         let silver_type = property_map::read_string(&silver_chest, &string::utf8(CHEST_TYPE_KEY));
         assert!(silver_type == string::utf8(SILVER), ERROR_SILVER_CHEST_REQUIRED);
 
-        assert!(object::is_owner(diamond_chest, sender_addres), ERROR_NOT_OWNER);
+        assert!(object::is_owner(diamond_chest, owner), ERROR_NOT_OWNER);
         let diamond_type = property_map::read_string(&diamond_chest, &string::utf8(CHEST_TYPE_KEY));
         assert!(diamond_type == string::utf8(DIAMOND), ERROR_DIAMOND_CHEST_REQUIRED);
 
-        assert!(object::is_owner(gold_chest, sender_addres), ERROR_NOT_OWNER);
+        assert!(object::is_owner(gold_chest, owner), ERROR_NOT_OWNER);
         let gold_type = property_map::read_string(&gold_chest, &string::utf8(CHEST_TYPE_KEY));
         assert!(gold_type == string::utf8(GOLD), ERROR_GOLD_CHEST_REQUIRED);
 
@@ -743,12 +747,12 @@ module jungle_gem::jungle_gem {
         let chest_data = smart_table::borrow(&contract_data.chests, string::utf8(SAPPHIRE));
         let resource_signer = account::create_signer_with_capability(&contract_data.signer_cap);
 
-        mint_chest_internal(resource_signer, chest_data, string::utf8(SAPPHIRE), sender_addres);
+        mint_chest_internal(resource_signer, chest_data, string::utf8(SAPPHIRE), owner);
 
         emit_event<ChestConvertEvent>(
             &mut contract_data.chest_convert_event,
             ChestConvertEvent {
-                owner: sender_addres,
+                owner,
             }
         );
     }
