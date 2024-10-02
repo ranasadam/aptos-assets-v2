@@ -707,7 +707,6 @@ module jungle_run::jungle_run {
     }
 
 
-
     public entry fun create_user(
         user: &signer,
         email: String,
@@ -1058,6 +1057,10 @@ module jungle_run::jungle_run {
 
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
 
+        //check if user exists
+        let is_already_exists = smart_table::contains(&contract_data.users, email);
+        assert!(is_already_exists, ERROR_USER_NOT_EXISTS);
+
         let user_data = smart_table::borrow_mut(&mut contract_data.users, email);
         assert!(user_data.remaining_actions != 0, ERROR_ALL_ACTION_CONSUMED);
 
@@ -1072,6 +1075,23 @@ module jungle_run::jungle_run {
                 user_data: create(user_data)
             }
         );
+    }
+
+    public entry fun update_user_action(
+        user: &signer,
+        email: String,
+        actions_to_add: u64,
+    ) acquires ContractData {
+        //check authentication of admin
+        authorize_only_admin(user);
+
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+        //check if user exists
+        let is_already_exists = smart_table::contains(&contract_data.users, email);
+        assert!(is_already_exists, ERROR_USER_NOT_EXISTS);
+
+        let user_data = smart_table::borrow_mut(&mut contract_data.users, email);
+        user_data.max_actions = user_data.max_actions + actions_to_add;
     }
 
     public entry fun add_action_pack(
@@ -1162,9 +1182,6 @@ module jungle_run::jungle_run {
             avatar_keys
         )
     }
-
-
-
 
 
     #[view]
@@ -1340,7 +1357,6 @@ module jungle_run::jungle_run {
     }
 
 
-
     fun authorize_only_admin(user: &signer) acquires ContractData {
         let sender_addres = signer::address_of(user);
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
@@ -1395,7 +1411,6 @@ module jungle_run::jungle_run {
             };
         };
     }
-
 
 
     inline fun has_record(
