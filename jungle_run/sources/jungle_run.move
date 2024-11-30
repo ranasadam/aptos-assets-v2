@@ -442,7 +442,7 @@ module jungle_run::jungle_run {
             &mut contract_data.update_whitelist_collection_event,
             UpdateWhitelistCollectionEvent {
                 collection_address,
-                extrga_moves_on_staking,
+                extra_moves_on_staking,
             }
         );
     }
