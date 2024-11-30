@@ -1,12 +1,10 @@
 module jungle_run::examples {
-    use std::string;
     use std::string::String;
     use aptos_framework::account;
-    use aptos_framework::event::{emit_event, EventHandle};
+    use aptos_framework::event::EventHandle;
     use aptos_framework::object;
-    use aptos_framework::object::{Object, object_address};
+
     use aptos_token_objects::collection::Collection;
-    use aptos_token_objects::property_map;
     use aptos_token_objects::token;
     use aptos_token_objects::token::Token;
 
@@ -38,36 +36,6 @@ module jungle_run::examples {
         });
     }
 
-    public entry fun burn_nft(owner: &signer, token: Object<Token>) acquires ContractData {
-        let contract_data = borrow_global_mut<ContractData>(DEFAULT_ADMIN);
-
-        let chest_type = property_map::read_string(&token, &string::utf8(CHEST_TYPE_KEY));
-        object::burn(owner, token);
-
-        emit_event<TokenPropertyEvent>(
-            &mut contract_data.token_property_event,
-            TokenPropertyEvent {
-                token_address: object_address(&token),
-                chest_type,
-            }
-        );
-    }
-
-    #[lint::allow_unsafe_randomness]
-    #[randomness]
-    entry fun check_randomness(
-        start_range: u64, end_range: u64
-    ) acquires ContractData {
-        let contract_data = borrow_global_mut<ContractData>(DEFAULT_ADMIN);
-
-        let random = aptos_framework::randomness::u64_range(start_range, end_range);
-        emit_event<RandomEvent>(
-            &mut contract_data.random_event,
-            RandomEvent {
-                random,
-            }
-        );
-    }
 
     #[view]
     public fun check_owner(

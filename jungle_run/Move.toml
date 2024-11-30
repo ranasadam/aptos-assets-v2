@@ -4,9 +4,9 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-jungle_run = "8d30ec385d45c6ad43f39e857c2d17896eadcbed9ea201ad72ae3aea9ad3452b"
-jungle_run_default_admin = "baa4882c050dd32d2405e9c50eecd308afa1cf4f023e45371671a60a051ea500"
-jungle_run_dev = "baa4882c050dd32d2405e9c50eecd308afa1cf4f023e45371671a60a051ea500"
+jungle_run = "56a1cdb1caf4566c70405df72f5890d64f5ed20e0a213ae9c696bf29992a0156"
+jungle_run_default_admin = "2cfb9462b3de6b7a5d2b4b648ece96ade1e35d1a4fc4c7a241d1d30ce4a9fe5f"
+jungle_run_dev = "2cfb9462b3de6b7a5d2b4b648ece96ade1e35d1a4fc4c7a241d1d30ce4a9fe5f"
 null_address = "0x0"
 
 [dependencies.AptosFramework]

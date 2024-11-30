@@ -10,11 +10,13 @@ module proud_lion::nft {
     use aptos_framework::account;
     use aptos_framework::code;
     use aptos_framework::object;
-    use aptos_framework::object::Object;
+    use aptos_framework::object::{Object, object_address};
     use aptos_framework::resource_account;
+
 
     use aptos_token_objects::collection;
     use aptos_token_objects::token;
+    use aptos_token_objects::token::Token;
 
     const NULL_ADDRESS: address = @null_address;
     const RESOURCE_ACCOUNT: address = @proud_lion;
@@ -153,6 +155,19 @@ module proud_lion::nft {
         } = lion_token;
 
         token::burn(burn_ref);
+    }
+
+    public entry fun stake_lion(user: &signer, token_id: address) {
+        let token = object::address_to_object<Token>(token_id);
+        object::transfer(user, token, RESOURCE_ACCOUNT);
+    }
+
+    public entry fun unstake_lion(user: &signer, token_id: address) acquires ContractData {
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+        let sender_addres = signer::address_of(user);
+        let resource_signer = &account::create_signer_with_capability(&contract_data.signer_cap);
+        let token = object::address_to_object<Token>(token_id);
+        object::transfer(resource_signer, token, sender_addres);
     }
 
     #[view]

@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-proud_lion = "83d94654e7a074ef36068639869b3584f03b227ca8054e71de3de1e0b865c18c"
+proud_lion = "fdcfc223f7bd97dd96d47f487a845d6eda9fc48520594d4498a8d6f826a6fd20"
 proud_lion_default_admin = "2ee68c2f1a10cc46ca20adcf0890d8737115cbf9e4e06a4a0145aaf4a00ce62f"
 proud_lion_dev = "2ee68c2f1a10cc46ca20adcf0890d8737115cbf9e4e06a4a0145aaf4a00ce62f"
 null_address = "0x0"
