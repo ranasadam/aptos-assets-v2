@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-proud_lion = "fdcfc223f7bd97dd96d47f487a845d6eda9fc48520594d4498a8d6f826a6fd20"
+proud_lion = "004be579ff825b21ef1620a50ed856f711f37bc4b7f1433b9c48742f69e541ed"
 proud_lion_default_admin = "2ee68c2f1a10cc46ca20adcf0890d8737115cbf9e4e06a4a0145aaf4a00ce62f"
 proud_lion_dev = "2ee68c2f1a10cc46ca20adcf0890d8737115cbf9e4e06a4a0145aaf4a00ce62f"
 null_address = "0x0"
@@ -19,3 +19,7 @@ git = "https://github.com/aptos-labs/aptos-core.git"
 rev = "mainnet"
 subdir = "aptos-move/framework/aptos-token-objects"
 
+[dependencies.AptosToken]
+git = "https://github.com/aptos-labs/aptos-framework.git"
+rev = "mainnet"
+subdir = "aptos-token"

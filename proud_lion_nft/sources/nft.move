@@ -1,22 +1,23 @@
 module proud_lion::nft {
+    use std::bcs;
     use std::error;
     use std::option;
     use std::signer;
     use std::string;
-    use std::string::String;
+    use aptos_std::string_utils::to_string;
+    use std::string::{String};
     use aptos_std::simple_map;
     use aptos_std::smart_table;
     use aptos_std::smart_table::SmartTable;
     use aptos_framework::account;
     use aptos_framework::code;
     use aptos_framework::object;
-    use aptos_framework::object::{Object, object_address};
+    use aptos_framework::object::Object;
     use aptos_framework::resource_account;
-
+    use aptos_token::token as tokenv1;
 
     use aptos_token_objects::collection;
-    use aptos_token_objects::token;
-    use aptos_token_objects::token::Token;
+    use aptos_token_objects::token as tokenv2;
 
     const NULL_ADDRESS: address = @null_address;
     const RESOURCE_ACCOUNT: address = @proud_lion;
@@ -29,6 +30,8 @@ module proud_lion::nft {
     const ERROR_TOKEN_DOES_NOT_EXIST: u64 = 2;
     const ERROR_NOT_OWNER: u64 = 3;
 
+    const BURNABLE_BY_OWNER: vector<u8> = b"TOKEN_BURNABLE_BY_OWNER";
+    const BURNABLE_BY_CREATOR: vector<u8> = b"TOKEN_BURNABLE_BY_CREATOR";
 
     // The lion token collection name
     const COLLECTION_NAME: vector<u8> = b"Proud Lion";
@@ -43,6 +46,8 @@ module proud_lion::nft {
 
         // Smart table to store lion of different type
         lions: SmartTable<String, LionData>,
+        // Index of v1 token that will append with name to make it unique
+        v1_index: u64
     }
 
 
@@ -55,19 +60,39 @@ module proud_lion::nft {
     // NFT related structures
     #[resource_group_member(group = aptos_framework::object::ObjectGroup)]
     struct LionToken has key {
-        mutator_ref: token::MutatorRef,
-        burn_ref: token::BurnRef,
+        mutator_ref: tokenv2::MutatorRef,
+        burn_ref: tokenv2::BurnRef,
     }
 
     fun init_module(sender: &signer) {
         let signer_cap = resource_account::retrieve_resource_account_cap(sender, DEV);
         let resource_signer = account::create_signer_with_capability(&signer_cap);
 
+        let collection_name = string::utf8(COLLECTION_NAME);
+        let description = string::utf8(COLLECTION_DESCRIPTION);
+        let collection_uri = string::utf8(COLLECTION_URI);
+
+        // This means that the supply of the token will not be tracked.
+        let maximum_supply = 0;
+        // This variable sets if we want to allow mutation for collection description, uri, and maximum.
+        // Here, we are setting all of them to false, which means that we don't allow mutations to any CollectionData fields.
+        let mutate_setting = vector<bool>[ false, false, false ];
+
+        // Create the nft v1 collection.
+        tokenv1::create_collection(
+            &resource_signer,
+            collection_name,
+            description,
+            collection_uri,
+            maximum_supply,
+            mutate_setting
+        );
 
         move_to(&resource_signer, ContractData {
             admin: DEFAULT_ADMIN,
             signer_cap,
             lions: getLionsData(),
+            v1_index: 1,
         });
         create_proud_lion_collection(&resource_signer);
     }
@@ -114,7 +139,7 @@ module proud_lion::nft {
 
         let name_str = lion_data.name;
         string::append(&mut name_str, string::utf8(b" #"));
-        let constructor_ref = token::create_numbered_token(
+        let constructor_ref = tokenv2::create_numbered_token(
             &resource_signer,
             collection,
             lion_data.description,
@@ -127,8 +152,8 @@ module proud_lion::nft {
         // Generates the object signer and the refs.  The refs are used to manage the token.
         let object_signer = object::generate_signer(&constructor_ref);
         let transfer_ref = object::generate_transfer_ref(&constructor_ref);
-        let mutator_ref = token::generate_mutator_ref(&constructor_ref);
-        let burn_ref = token::generate_burn_ref(&constructor_ref);
+        let mutator_ref = tokenv2::generate_mutator_ref(&constructor_ref);
+        let burn_ref = tokenv2::generate_burn_ref(&constructor_ref);
 
         // Transfers the token to the address
         let linear_transfer_ref = object::generate_linear_transfer_ref(&transfer_ref);
@@ -154,20 +179,58 @@ module proud_lion::nft {
             burn_ref,
         } = lion_token;
 
-        token::burn(burn_ref);
+        tokenv2::burn(burn_ref);
     }
 
-    public entry fun stake_lion(user: &signer, token_id: address) {
-        let token = object::address_to_object<Token>(token_id);
-        object::transfer(user, token, RESOURCE_ACCOUNT);
-    }
-
-    public entry fun unstake_lion(user: &signer, token_id: address) acquires ContractData {
+    public entry fun mint_lion_v1(
+        receiver: &signer,
+        lion_type: String,
+        amount: u64
+    ) acquires ContractData {
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
-        let sender_addres = signer::address_of(user);
-        let resource_signer = &account::create_signer_with_capability(&contract_data.signer_cap);
-        let token = object::address_to_object<Token>(token_id);
-        object::transfer(resource_signer, token, sender_addres);
+        let resource_signer = account::create_signer_with_capability(&contract_data.signer_cap);
+
+        //check if lion type not exists
+        assert!(smart_table::contains(&contract_data.lions, lion_type), ERROR_LION_NOT_EXISTS);
+
+        let lion_data = smart_table::borrow(&contract_data.lions, lion_type);
+
+        let token_name: string::String = lion_data.name ;
+        string::append_utf8(&mut token_name, b" ");
+        string::append(&mut token_name, to_string<u64>(&contract_data.v1_index));
+
+        let token_data_id = tokenv1::create_tokendata(
+            &resource_signer,
+            string::utf8(COLLECTION_NAME),
+            token_name,
+            lion_data.description,
+            0,
+            lion_data.token_uri,
+            DEFAULT_ADMIN,
+            1,
+            0,
+            tokenv1::create_token_mutability_config(
+                &vector<bool>[ false, false, false, false, true ]
+            ),
+            vector<String>[string::utf8(BURNABLE_BY_CREATOR), string::utf8(BURNABLE_BY_OWNER)],
+            vector<vector<u8>>[ bcs::to_bytes<bool>(&true), bcs::to_bytes<bool>(&true)],
+            vector<String>[ string::utf8(b"bool"), string::utf8(b"bool") ],
+        );
+
+        let resource_signer = account::create_signer_with_capability(&contract_data.signer_cap);
+        let token_id = tokenv1::mint_token(&resource_signer, token_data_id, amount);
+        tokenv1::direct_transfer(&resource_signer, receiver, token_id, amount);
+
+        contract_data.v1_index = contract_data.v1_index + 1;
+    }
+
+    public entry fun burn_lion_v1(
+        user: &signer,
+        token_name: String,
+        property_version: u64,
+        amount: u64
+    ) {
+        tokenv1::burn(user, RESOURCE_ACCOUNT, string::utf8(COLLECTION_NAME), token_name, property_version, amount);
     }
 
     #[view]

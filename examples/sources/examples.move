@@ -3,10 +3,9 @@ module jungle_run::examples {
     use aptos_framework::account;
     use aptos_framework::event::EventHandle;
     use aptos_framework::object;
-
-    use aptos_token_objects::collection::Collection;
     use aptos_token_objects::token;
     use aptos_token_objects::token::Token;
+    use aptos_token_objects::collection::Collection;
 
     const DEFAULT_ADMIN: address = @jungle_run;
 

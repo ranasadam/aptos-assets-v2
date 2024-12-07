@@ -2,11 +2,12 @@
 name = "jungle_run"
 version = "1.0.0"
 authors = []
+upgrade_policy="compatible"
 
 [addresses]
-jungle_run = "56a1cdb1caf4566c70405df72f5890d64f5ed20e0a213ae9c696bf29992a0156"
-jungle_run_default_admin = "2cfb9462b3de6b7a5d2b4b648ece96ade1e35d1a4fc4c7a241d1d30ce4a9fe5f"
-jungle_run_dev = "2cfb9462b3de6b7a5d2b4b648ece96ade1e35d1a4fc4c7a241d1d30ce4a9fe5f"
+jungle_run = "117b2e17bf3d298d6f63ad93dcb969ecdeba6c23f3dcd22a4a72c41af9e1ee21"
+jungle_run_default_admin = "223f1f3b1e75baeae0f4b4b5cd82840fcd81f76c11d9f9a60727bac22d4a298f"
+jungle_run_dev = "223f1f3b1e75baeae0f4b4b5cd82840fcd81f76c11d9f9a60727bac22d4a298f"
 null_address = "0x0"
 
 [dependencies.AptosFramework]
@@ -18,5 +19,11 @@ subdir = "aptos-move/framework/aptos-framework"
 git = "https://github.com/aptos-labs/aptos-core.git"
 rev = "mainnet"
 subdir = "aptos-move/framework/aptos-token-objects"
+
+[dependencies.AptosToken]
+git = "https://github.com/aptos-labs/aptos-framework.git"
+rev = "mainnet"
+subdir = "aptos-token"
+
 
 
