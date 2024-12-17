@@ -6,6 +6,7 @@ module jungle_run::jungle_run {
     use std::string::String;
     use std::vector;
     use aptos_std::simple_map;
+    use aptos_std::simple_map::SimpleMap;
     use aptos_std::smart_table;
     use aptos_std::smart_table::SmartTable;
     use aptos_std::string_utils::to_string;
@@ -18,7 +19,7 @@ module jungle_run::jungle_run {
     use aptos_framework::coin;
     use aptos_framework::event::{emit_event, EventHandle};
     use aptos_framework::object;
-    use aptos_framework::object::{Object, TransferRef};
+    use aptos_framework::object::{Object, TransferRef, object_address};
     use aptos_framework::resource_account;
     use aptos_framework::timestamp;
 
@@ -1406,7 +1407,77 @@ module jungle_run::jungle_run {
         );
     }
 
-    public entry fun stake_nft(staker: &signer, token_id: address) acquires ContractData {
+    public entry fun stake_nft(staker: &signer, token_ids: vector<address>) acquires ContractData {
+        let user_address = signer::address_of(staker);
+
+        let all_valid = validate_nfts(token_ids);
+        assert!(all_valid, ERROR_WRONG_COLLECTION);
+
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+
+        let len = vector::length(&token_ids);
+        let i = 0;
+        while (i < len) {
+            let token_id = *vector::borrow(&token_ids, i);
+            let token = object::address_to_object<Tokenv2>(token_id);
+            let collection = tokenv2::collection_object(token);
+            let collection_address = object::object_address<Collection>(&collection);
+            let reward_moves = *smart_table::borrow(&mut contract_data.whitelist_data, collection_address);
+
+            object::transfer(staker, token, RESOURCE_ACCOUNT);
+
+            let stake_nft = StakedNFT {
+                token_id,
+                staker: user_address,
+                reward_moves
+            };
+
+            vector::push_back(&mut contract_data.staked_nfts, stake_nft);
+
+            emit_event<StakeNFTEvent>(
+                &mut contract_data.stake_nft_event,
+                StakeNFTEvent {
+                    token_id,
+                    staker: user_address,
+                    reward_moves
+                }
+            );
+
+            i = i + 1;
+        };
+    }
+
+    public entry fun unstake_nft(staker: &signer, token_ids: vector<address>) acquires ContractData {
+        let user_address = signer::address_of(staker);
+
+        let (all_staked, staked_data) = validate_staked_nfts(user_address, token_ids);
+        assert!(all_staked, ERROR_NFT_NOT_STAKED);
+        
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+        let resource_signer = &account::create_signer_with_capability(&contract_data.signer_cap);
+        let len = vector::length(&token_ids);
+        let i = 0;
+        while (i < len) {
+            let token_id = *vector::borrow(&token_ids, i);
+            let staked_index = *simple_map::borrow(&mut staked_data, &token_id);
+          
+            let token = object::address_to_object<Tokenv2>(token_id);
+            object::transfer(resource_signer, token, user_address);
+            vector::remove(&mut contract_data.staked_nfts, staked_index);
+
+            emit_event<UnstakeNFTEvent>(
+                &mut contract_data.unstake_nft_event,
+                UnstakeNFTEvent {
+                    token_id,
+                    staker: user_address,
+                }
+            );
+            i = i + 1;
+        }
+    }
+    
+
+    public entry fun stake_nft_single(staker: &signer, token_id: address) acquires ContractData {
         let user_address = signer::address_of(staker);
 
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
@@ -1440,7 +1511,7 @@ module jungle_run::jungle_run {
         );
     }
 
-    public entry fun unstake_nft(staker: &signer, token_id: address) acquires ContractData {
+    public entry fun unstake_nft_single(staker: &signer, token_id: address) acquires ContractData {
         let user_address = signer::address_of(staker);
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
         let index = option::none<u64>();
@@ -1530,7 +1601,7 @@ module jungle_run::jungle_run {
             }
         );
     }
-    
+
     public entry fun unstake_nft_v1(
         staker: &signer,
         creator_address: address,
@@ -2178,4 +2249,53 @@ module jungle_run::jungle_run {
         index
     }
 
+    fun validate_nfts(token_ids: vector<address>): (bool) acquires ContractData {
+        let contract_data = borrow_global<ContractData>(RESOURCE_ACCOUNT);
+
+        let all_valid = true;
+        let len = vector::length(&token_ids);
+        let i = 0;
+        while (i < len) {
+            let token_id = *vector::borrow(&token_ids, i);
+            let token = object::address_to_object<Tokenv2>(token_id);
+            let collection = tokenv2::collection_object(token);
+            let collection_address = object::object_address<Collection>(&collection);
+
+            //check if all tokens belongs to whitelist collections
+            if (!smart_table::contains(&contract_data.whitelist_data, collection_address)) {
+                all_valid = false;
+                break
+            };
+            i = i + 1;
+        };
+
+        all_valid
+    }
+
+    fun validate_staked_nfts(
+        staker_address: address,
+        token_ids: vector<address>
+    ): (bool, SimpleMap<address, u64>) acquires ContractData {
+        let contract_data = borrow_global<ContractData>(RESOURCE_ACCOUNT);
+
+        let staked_data = simple_map::new<address, u64>();
+
+        let token_ids_len = vector::length(&token_ids);
+        let i = 0;
+        let stake_nft_len = vector::length(&contract_data.staked_nfts);
+        while (i < token_ids_len) {
+            let token_id = *vector::borrow(&token_ids, i);
+            let j = 0;
+            while (j < stake_nft_len) {
+                let staked_nft = *vector::borrow(&contract_data.staked_nfts, j);
+                if (staked_nft.token_id == token_id && staked_nft.staker == staker_address) {
+                    simple_map::add(&mut staked_data, token_id, j);
+                };
+                j = j + 1;
+            };
+            i = i + 1;
+        };
+
+        (vector::length(&token_ids) == simple_map::length(&staked_data), staked_data)
+    }
 }
