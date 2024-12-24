@@ -19,7 +19,7 @@ module jungle_run::jungle_run {
     use aptos_framework::coin;
     use aptos_framework::event::{emit_event, EventHandle};
     use aptos_framework::object;
-    use aptos_framework::object::{Object, TransferRef, object_address};
+    use aptos_framework::object::{Object, TransferRef};
     use aptos_framework::resource_account;
     use aptos_framework::timestamp;
 
@@ -1933,6 +1933,28 @@ module jungle_run::jungle_run {
 
         (
             user_nfts, user_nfts_v1
+        )
+    }
+
+    #[view]
+    public fun get_whitelist_data(): (vector<address>, vector<address>) acquires ContractData {
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+        let collections = vector::empty<address>();
+        let creators = vector::empty<address>();
+
+        let whitelist_data = smart_table::to_simple_map(&mut contract_data.whitelist_data);
+        let whitelist_addresses = simple_map::keys(&mut whitelist_data);
+
+        vector::for_each(whitelist_addresses, |whitelist_address| {
+            if (object::object_exists<Collection>(whitelist_address)) {
+                vector::push_back(&mut collections, whitelist_address);
+            }else {
+                vector::push_back(&mut creators, whitelist_address);
+            }
+        });
+
+        (
+            collections, creators
         )
     }
 
