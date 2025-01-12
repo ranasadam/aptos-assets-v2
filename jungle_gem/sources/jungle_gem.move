@@ -402,8 +402,8 @@ module jungle_gem::jungle_gem {
         store: Object<T>,
         fa: FungibleAsset,
         transfer_ref: &TransferRef,
-    ) acquires State {
-        let state = borrow_global_mut<State>(RESOURCE_ACCOUNT);
+    ) {
+        /*let state = borrow_global_mut<State>(RESOURCE_ACCOUNT);
         let total_amount = mul_div(fungible_asset::amount(&fa), 1000, REMAINING_PERCENTAGE);
         let fee = mul_div(total_amount, FEE_PERCENTAGE, 1000);
         let fee_fa = fungible_asset::extract(&mut fa, fee);
@@ -411,7 +411,7 @@ module jungle_gem::jungle_gem {
         state.total_fee_generated = state.total_fee_generated + fee;
         state.total_token_staked = state.total_token_staked + fee;
 
-        fungible_asset::deposit_with_ref(transfer_ref, state.staked_tokens, fee_fa);
+        fungible_asset::deposit_with_ref(transfer_ref, state.staked_tokens, fee_fa);*/
         fungible_asset::deposit_with_ref(transfer_ref, store, fa);
     }
 

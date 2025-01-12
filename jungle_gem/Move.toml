@@ -4,7 +4,7 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-jungle_gem = "411318679de3b1a26bfa7fbf159da930c8e68f244983b7b7a41ff5fa6d38fe62"
+jungle_gem = "1060d33cb201470012fc4303df1ab05436dde1e1f490c3419a773d8deb16f5af"
 jungle_gem_default_admin = "62647058b3c06582fc3bbac4ace42d0bd1e1a21adbaf6a8e6d63d7ed7039be6b"
 jungle_gem_dev = "62647058b3c06582fc3bbac4ace42d0bd1e1a21adbaf6a8e6d63d7ed7039be6b"
 null_address = "0x0"
