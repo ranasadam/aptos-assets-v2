@@ -9,6 +9,8 @@ module jungle_run::jungle_run {
     use aptos_std::simple_map::SimpleMap;
     use aptos_std::smart_table;
     use aptos_std::smart_table::SmartTable;
+    use aptos_std::smart_vector;
+    use aptos_std::smart_vector::{for_each_mut, SmartVector};
     use aptos_std::string_utils::to_string;
     use aptos_std::type_info::Self;
     use aptos_framework::account;
@@ -22,7 +24,6 @@ module jungle_run::jungle_run {
     use aptos_framework::object::{Object, TransferRef};
     use aptos_framework::resource_account;
     use aptos_framework::timestamp;
-
     use aptos_token::token as tokenv1;
 
     use aptos_token_objects::collection;
@@ -45,6 +46,12 @@ module jungle_run::jungle_run {
     // const TOTAL_COOL_DOWN_TIME: u64 = 20 * 60;
     const INITIAL_MAX_ACTIONS: u64 = 5;
     const TOTAL_COOL_DOWN_TIME: u64 = 1 * 60;
+
+    // Time to earn points = 24 hours
+    //const POINT_EARNING_TIME:u64 = 86400;
+
+    // Time to earn points for testing = 5 min
+    const POINT_EARNING_TIME: u64 = 300;
 
     // Error codes
     const ERROR_ONLY_SUPER_ADMIN: u64 = 0;
@@ -94,13 +101,13 @@ module jungle_run::jungle_run {
         claimed_soul_bound_addresses: vector<address>,
 
         // Store address of whitelist collection or creator in case of v1 nft and extra moves to get when stake nft
-        whitelist_data: SmartTable<address, u64>,
+        whitelist_data: SmartTable<address, WhitelistData>,
 
         // vectors to store staked nft information
-        staked_nfts: vector<StakedNFT>,
+        staked_nfts: SmartVector<StakedNFT>,
 
         // vectors to store staked v1 nft information
-        staked_v1_nfts: vector<StakedV1NFT>,
+        staked_v1_nfts: SmartVector<StakedV1NFT>,
 
         // Smart table to store avatar of different type
         avatars: SmartTable<String, AvatarData>,
@@ -143,10 +150,24 @@ module jungle_run::jungle_run {
         reward_amount: u64,
     }
 
+    struct WhitelistData has copy, store, drop {
+        address: address,
+        extra_moves_on_staking: u64,
+        points_per_day: u64,
+    }
+
+    struct LeaderBoardData has copy, store, drop {
+        staker: address,
+        points_earned: u64,
+    }
+
     struct StakedNFT has copy, store, drop {
         token_id: address,
         staker: address,
         reward_moves: u64,
+        staking_time: u64,
+        points_per_day: u64,
+        points_earned: u64,
     }
 
     struct StakedV1NFT has copy, store, drop {
@@ -157,6 +178,9 @@ module jungle_run::jungle_run {
         property_version: u64,
         reward_moves: u64,
         amount: u64,
+        staking_time: u64,
+        points_per_day: u64,
+        points_earned: u64,
     }
 
     struct UserData has copy, store, drop {
@@ -172,7 +196,8 @@ module jungle_run::jungle_run {
         last_cool_down_time: u64,
         cool_down_timer: u64,
         avatar_score: vector<AvatarScore>,
-        inventory: vector<String>
+        inventory: vector<String>,
+        total_points_earned: u64,
     }
 
     struct AvatarScore has copy, store, drop {
@@ -189,7 +214,8 @@ module jungle_run::jungle_run {
         properties: vector<AvatarProperties>,
         royality_token_id: address,
         position: u64,
-        is_soul_bound: bool
+        is_soul_bound: bool,
+        collection_address: address
     }
 
     struct AvatarProperties has copy, store, drop {
@@ -254,6 +280,8 @@ module jungle_run::jungle_run {
         token_id: address,
         staker: address,
         reward_moves: u64,
+        staking_time: u64,
+        points_per_day: u64,
     }
 
     struct UnstakeNFTEvent has drop, store {
@@ -268,7 +296,9 @@ module jungle_run::jungle_run {
         token_name: String,
         property_version: u64,
         reward_moves: u64,
-        amount: u64
+        amount: u64,
+        staking_time: u64,
+        points_per_day: u64,
     }
 
     struct UnstakeV1NFTEvent has drop, store {
@@ -376,9 +406,9 @@ module jungle_run::jungle_run {
             admin: vector[DEFAULT_ADMIN],
             claimed_addresses: vector::empty<address>(),
             claimed_soul_bound_addresses: vector::empty<address>(),
-            whitelist_data: smart_table::new<address, u64>(),
-            staked_nfts: vector::empty<StakedNFT>(),
-            staked_v1_nfts: vector::empty<StakedV1NFT>(),
+            whitelist_data: smart_table::new<address, WhitelistData>(),
+            staked_nfts: smart_vector::empty<StakedNFT>(),
+            staked_v1_nfts: smart_vector::empty<StakedV1NFT>(),
             avatars: smart_table::new<String, AvatarData>(),
             users: smart_table::new<String, UserData>(),
             action_packs: smart_table::new<String, ActionData>(),
@@ -421,14 +451,19 @@ module jungle_run::jungle_run {
     public entry fun add_whitelist_data(
         sender: &signer,
         collection_creator_address: address,
-        extra_moves_on_staking: u64
+        extra_moves_on_staking: u64,
+        points_per_day: u64
     ) acquires ContractData {
         let sender_addr = signer::address_of(sender);
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
 
         //only super admin can white list collection/creator
         assert!(sender_addr == contract_data.super_admin, ERROR_ONLY_SUPER_ADMIN);
-        smart_table::add(&mut contract_data.whitelist_data, collection_creator_address, extra_moves_on_staking);
+        smart_table::add(&mut contract_data.whitelist_data, collection_creator_address, WhitelistData {
+            address: collection_creator_address,
+            extra_moves_on_staking,
+            points_per_day
+        });
 
         emit_event<AddWhitelistCollectionEvent>(
             &mut contract_data.add_whitelist_collection_event,
@@ -463,7 +498,8 @@ module jungle_run::jungle_run {
     public entry fun update_whitelist_data(
         sender: &signer,
         collection_creator_address: address,
-        extra_moves_on_staking: u64
+        extra_moves_on_staking: u64,
+        points_per_day: u64
     ) acquires ContractData {
         let sender_addr = signer::address_of(sender);
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
@@ -478,7 +514,15 @@ module jungle_run::jungle_run {
         );
 
         smart_table::remove(&mut contract_data.whitelist_data, collection_creator_address);
-        smart_table::add(&mut contract_data.whitelist_data, collection_creator_address, extra_moves_on_staking);
+        smart_table::add(
+            &mut contract_data.whitelist_data,
+            collection_creator_address,
+            WhitelistData {
+                address: collection_creator_address,
+                extra_moves_on_staking,
+                points_per_day
+            }
+        );
 
         emit_event<UpdateWhitelistCollectionEvent>(
             &mut contract_data.update_whitelist_collection_event,
@@ -530,6 +574,7 @@ module jungle_run::jungle_run {
         avatar_token_uri: String,
         avatar_properties_keys: vector<String>,
         avatar_properties_values: vector<String>,
+        collection_address: address,
         royality_token_id: address,
         is_soul_bound: bool
     ) acquires ContractData {
@@ -557,7 +602,8 @@ module jungle_run::jungle_run {
             properties: vector::empty(),
             royality_token_id,
             position: 1,
-            is_soul_bound
+            is_soul_bound,
+            collection_address
         };
         let i = 0;
         while (i < vector::length(&avatar_properties_keys)) {
@@ -652,7 +698,35 @@ module jungle_run::jungle_run {
         };
     }
 
-    // Mints free token. This function mints a new soul bound token to user address.
+    /// Mints a free soul-bound avatar to the user's address.
+    ///
+    /// # Description
+    /// This function allows a user to claim a free soul-bound token of the specified avatar type.
+    /// The token is tied to the user's address and cannot be transferred.
+    ///
+    /// # Parameters
+    /// - `user`: A reference to the signer initiating the transaction. This is the recipient of the soul-bound avatar.
+    /// - `avatar_type`: A `String` specifying the type of avatar the user wants to mint.
+    ///
+    /// # Behavior
+    /// - Verifies that the provided `avatar_type` exists in the contract.
+    /// - Ensures that the user's address has not already claimed a free avatar.
+    /// - Updates the `claimed_soul_bound_addresses` list to include the user's address.
+    /// - Mints a new soul-bound token of the specified `avatar_type` to the user's address.
+    ///
+    /// # Requirements
+    /// - The `avatar_type` must exist in the `avatars` smart table within the `ContractData`.
+    /// - The user's address must not have already claimed a soul-bound avatar.
+    ///
+    /// # Errors
+    /// - `ERROR_AVATAR_NOT_EXISTS`: Raised if the specified `avatar_type` does not exist.
+    /// - `ERROR_AVATAR_ALREADY_CLAIMED`: Raised if the user has already claimed a soul-bound avatar.
+    ///
+    /// # Example
+    /// ```
+    /// // Assuming `user_signer` is the user:
+    /// mint_free_soul_bound_avatar(&user_signer, "LOIN");
+    /// ```
     public entry fun mint_free_soul_bound_avatar(
         user: &signer,
         avatar_type: String,
@@ -676,7 +750,36 @@ module jungle_run::jungle_run {
         mint_token(contract_data, avatar_type, sender_addres, avatar_data.is_soul_bound);
     }
 
-    // Mints token. This function mints a new token to receiver address.
+    /// Mints a free avatar to the specified receiver address.
+    ///
+    /// # Description
+    /// This function allows an admin to mint a free avatar of a specified type to a given receiver's address.
+    /// The admin can also define whether the avatar should be soul-bound (non-transferable).
+    ///
+    /// # Parameters
+    /// - `admin`: A reference to the signer who is an authorized admin. Only an admin can call this function.
+    /// - `avatar_type`: A `String` specifying the type of avatar to mint.
+    /// - `receiver_address`: The `address` of the recipient who will receive the minted avatar.
+    /// - `is_soul_bound`: A `bool` indicating whether the avatar is soul-bound (`true`) or transferable (`false`).
+    ///
+    /// # Behavior
+    /// - Verifies that the caller (`admin`) is authorized and exists in the list of admins.
+    /// - Ensures that the provided `avatar_type` exists in the `ContractData`.
+    /// - Mints a new avatar of the specified type to the `receiver_address` with the provided soul-bound property.
+    ///
+    /// # Requirements
+    /// - The caller (`admin`) must have admin privileges.
+    /// - The `avatar_type` must exist in the `avatars` smart table within the `ContractData`.
+    ///
+    /// # Errors
+    /// - `ERROR_ONLY_ADMIN`: Raised if the caller is not an admin.
+    /// - `ERROR_AVATAR_NOT_EXISTS`: Raised if the specified `avatar_type` does not exist.
+    ///
+    /// # Example
+    /// ```
+    /// // Assuming `admin_signer` is the admin:
+    /// admin_mint_free_avatar(&admin_signer, "LOIN", recipient_address, true);
+    /// ```
     public entry fun admin_mint_free_avatar(
         admin: &signer,
         avatar_type: String,
@@ -695,8 +798,42 @@ module jungle_run::jungle_run {
         mint_token(contract_data, avatar_type, receiver_address, is_soul_bound);
     }
 
-    // Mints token. This function mints a new token to user address who own nft from proud lions.
-    public entry fun mint_free_avatar(
+    /// Mints a free avatar to the user's address.
+    ///
+    /// # Description
+    /// This function allows a user to claim a free 2D avatar of a specified type. The avatar is soul-bound (non-transferable)
+    /// and tied to the user's address. The user must own a token from a specific whitelisted collection to claim the avatar.
+    ///
+    /// # Parameters
+    /// - `user`: A reference to the signer initiating the transaction. This is the recipient of the 2D avatar.
+    /// - `avatar_type`: A `String` specifying the type of 2D avatar the user wants to mint.
+    /// - `token_id`: An `address` representing the token the user owns, which will be verified as part of the whitelisted collection.
+    ///
+    /// # Behavior
+    /// - Verifies that the specified `avatar_type` exists in the contract.
+    /// - Retrieves the associated token and verifies it belongs to a whitelisted collection.
+    /// - Ensures the caller (`user`) is the owner of the token.
+    /// - Checks that the caller's address has not already claimed a free 2D avatar.
+    /// - Updates the list of claimed addresses and mints a new soul-bound avatar of the specified type to the user's address.
+    ///
+    /// # Requirements
+    /// - The specified `avatar_type` must exist in the `avatars` within the contract.
+    /// - The token identified by `token_id` must belong to a whitelisted collection.
+    /// - The signer (`user`) must be the owner of the token.
+    /// - The signer must not have already claimed a free avatar.
+    ///
+    /// # Errors
+    /// - `ERROR_AVATAR_NOT_EXISTS`: Raised if the specified `avatar_type` does not exist.
+    /// - `ERROR_WRONG_COLLECTION`: Raised if the token does not belong to the whitelisted collection.
+    /// - `ERROR_NOT_OWNER`: Raised if the signer is not the owner of the token.
+    /// - `ERROR_AVATAR_ALREADY_CLAIMED`: Raised if the signer has already claimed a free avatar.
+    ///
+    /// # Example
+    /// ```
+    /// // Assuming `user_signer` is the user:
+    /// mint_free_2D_avatar(&user_signer, "LION", token_address);
+    /// ```
+    public entry fun mint_free_2D_avatar(
         user: &signer,
         avatar_type: String,
         token_id: address,
@@ -712,8 +849,10 @@ module jungle_run::jungle_run {
         //check if avatar type not exists
         assert!(smart_table::contains(&contract_data.avatars, avatar_type), ERROR_AVATAR_NOT_EXISTS);
 
+        let avatar_data = smart_table::borrow(&contract_data.avatars, avatar_type);
+
         //check if token belongs to whitelist collection
-        assert!(smart_table::contains(&contract_data.whitelist_data, collection_address), ERROR_WRONG_COLLECTION);
+        assert!(avatar_data.collection_address == collection_address, ERROR_WRONG_COLLECTION);
 
         //check if signer is owner of token
         assert!(object::is_owner(token, sender_addres), ERROR_NOT_OWNER);
@@ -723,7 +862,6 @@ module jungle_run::jungle_run {
             !vector::contains(&mut contract_data.claimed_addresses, &sender_addres),
             ERROR_AVATAR_ALREADY_CLAIMED
         );
-
 
         vector::push_back(&mut contract_data.claimed_addresses, sender_addres);
 
@@ -956,6 +1094,7 @@ module jungle_run::jungle_run {
             cool_down_timer: TOTAL_COOL_DOWN_TIME,
             avatar_score: vector::empty(),
             inventory: vector::empty(),
+            total_points_earned: 0,
         };
 
         smart_table::add(&mut contract_data.users, email, user_data);
@@ -1232,7 +1371,7 @@ module jungle_run::jungle_run {
     }
 
     // This method will update all user action and will be called periodically from backend
-    public entry fun update_user_actions(
+    public entry fun maintanence(
         user: &signer,
     ) acquires ContractData {
         //check authentication of admin
@@ -1240,22 +1379,37 @@ module jungle_run::jungle_run {
 
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
 
-        let users = smart_table::to_simple_map(&mut contract_data.users);
-        let user_values = simple_map::values(&mut users);
-        let length = vector::length(&user_values);
-        let i = 0;
+        let now_sec = timestamp::now_seconds();
 
-        while (i < length) {
-            let user = *vector::borrow(&user_values, i);
-            let user_reward_move = get_staker_reward(
-                &mut contract_data.staked_nfts,
-                user.aptos_wallet
-            ) + get_staker_reward_v1(&mut contract_data.staked_v1_nfts, user.aptos_wallet);
-            let user_data = smart_table::borrow_mut(&mut contract_data.users, user.email);
-            if (user_data.last_cool_down_time == 0) {
-                continue
-            } else {
-                let now_sec = timestamp::now_seconds();
+        for_each_mut(&mut contract_data.staked_v1_nfts, |staked_v1_nft| {
+            if (now_sec - staked_v1_nft.staking_time >= POINT_EARNING_TIME) {
+                staked_v1_nft.staking_time = now_sec;
+                staked_v1_nft.points_earned = staked_v1_nft.points_earned + (staked_v1_nft.points_per_day * staked_v1_nft.amount);
+            };
+        });
+
+        for_each_mut(&mut contract_data.staked_nfts, |staked_nft| {
+            if (now_sec - staked_nft.staking_time >= POINT_EARNING_TIME) {
+                staked_nft.staking_time = now_sec;
+                staked_nft.points_earned = staked_nft.points_earned + staked_nft.points_per_day;
+            };
+        });
+
+        let users = smart_table::to_simple_map(&mut contract_data.users);
+        let user_keys = simple_map::keys(&mut users);
+
+        vector::for_each(user_keys, |key| {
+            let user_data = smart_table::borrow_mut(&mut contract_data.users, key);
+            let (total_rewards, total_points) = get_staker_reward(&contract_data.staked_nfts, user_data.aptos_wallet);
+            let (total_rewards_v1, total_points_v1) = get_staker_reward_v1(
+                &contract_data.staked_v1_nfts,
+                user_data.aptos_wallet
+            );
+
+            user_data.total_points_earned = total_points + total_points_v1;
+
+            let user_reward_move = total_rewards + total_rewards_v1;
+            if (user_data.last_cool_down_time != 0) {
                 if (now_sec - user_data.last_cool_down_time > user_data.cool_down_timer / 2) {
                     user_data.remaining_actions = (user_data.max_actions + user_reward_move) / 2;
                 };
@@ -1264,9 +1418,7 @@ module jungle_run::jungle_run {
                     user_data.last_cool_down_time = 0;
                 };
             };
-
-            i = i + 1;
-        };
+        });
     }
 
     public entry fun consume_user_action(
@@ -1422,24 +1574,29 @@ module jungle_run::jungle_run {
             let token = object::address_to_object<Tokenv2>(token_id);
             let collection = tokenv2::collection_object(token);
             let collection_address = object::object_address<Collection>(&collection);
-            let reward_moves = *smart_table::borrow(&mut contract_data.whitelist_data, collection_address);
+            let whitelist_data = *smart_table::borrow(&mut contract_data.whitelist_data, collection_address);
 
             object::transfer(staker, token, RESOURCE_ACCOUNT);
 
             let stake_nft = StakedNFT {
                 token_id,
                 staker: user_address,
-                reward_moves
+                reward_moves: whitelist_data.extra_moves_on_staking,
+                points_earned: 0,
+                points_per_day: whitelist_data.points_per_day,
+                staking_time: timestamp::now_seconds()
             };
 
-            vector::push_back(&mut contract_data.staked_nfts, stake_nft);
+            smart_vector::push_back(&mut contract_data.staked_nfts, stake_nft);
 
             emit_event<StakeNFTEvent>(
                 &mut contract_data.stake_nft_event,
                 StakeNFTEvent {
                     token_id,
                     staker: user_address,
-                    reward_moves
+                    reward_moves: whitelist_data.extra_moves_on_staking,
+                    staking_time: timestamp::now_seconds(),
+                    points_per_day: whitelist_data.points_per_day,
                 }
             );
 
@@ -1452,7 +1609,7 @@ module jungle_run::jungle_run {
 
         let (all_staked, staked_data) = validate_staked_nfts(user_address, token_ids);
         assert!(all_staked, ERROR_NFT_NOT_STAKED);
-        
+
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
         let resource_signer = &account::create_signer_with_capability(&contract_data.signer_cap);
         let len = vector::length(&token_ids);
@@ -1460,10 +1617,10 @@ module jungle_run::jungle_run {
         while (i < len) {
             let token_id = *vector::borrow(&token_ids, i);
             let staked_index = *simple_map::borrow(&mut staked_data, &token_id);
-          
+
             let token = object::address_to_object<Tokenv2>(token_id);
             object::transfer(resource_signer, token, user_address);
-            vector::remove(&mut contract_data.staked_nfts, staked_index);
+            smart_vector::remove(&mut contract_data.staked_nfts, staked_index);
 
             emit_event<UnstakeNFTEvent>(
                 &mut contract_data.unstake_nft_event,
@@ -1475,7 +1632,7 @@ module jungle_run::jungle_run {
             i = i + 1;
         }
     }
-    
+
 
     public entry fun stake_nft_single(staker: &signer, token_id: address) acquires ContractData {
         let user_address = signer::address_of(staker);
@@ -1489,24 +1646,29 @@ module jungle_run::jungle_run {
         //check if token belongs to whitelist collection
         assert!(smart_table::contains(&contract_data.whitelist_data, collection_address), ERROR_WRONG_COLLECTION);
 
-        let reward_moves = *smart_table::borrow(&mut contract_data.whitelist_data, collection_address);
+        let whitelist_data = *smart_table::borrow(&mut contract_data.whitelist_data, collection_address);
 
         object::transfer(staker, token, RESOURCE_ACCOUNT);
 
         let stake_nft = StakedNFT {
             token_id,
             staker: user_address,
-            reward_moves
+            reward_moves: whitelist_data.extra_moves_on_staking,
+            points_earned: 0,
+            points_per_day: whitelist_data.points_per_day,
+            staking_time: timestamp::now_seconds()
         };
 
-        vector::push_back(&mut contract_data.staked_nfts, stake_nft);
+        smart_vector::push_back(&mut contract_data.staked_nfts, stake_nft);
 
         emit_event<StakeNFTEvent>(
             &mut contract_data.stake_nft_event,
             StakeNFTEvent {
                 token_id,
                 staker: user_address,
-                reward_moves
+                reward_moves: whitelist_data.extra_moves_on_staking,
+                staking_time: timestamp::now_seconds(),
+                points_per_day: whitelist_data.points_per_day,
             }
         );
     }
@@ -1515,10 +1677,11 @@ module jungle_run::jungle_run {
         let user_address = signer::address_of(staker);
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
         let index = option::none<u64>();
-        let len = vector::length(&contract_data.staked_nfts);
+
+        let len = smart_vector::length(&contract_data.staked_nfts);
         let i = 0;
         while (i < len) {
-            let staked_nft = vector::borrow(&contract_data.staked_nfts, i);
+            let staked_nft = smart_vector::borrow(&contract_data.staked_nfts, i);
             if (staked_nft.staker == user_address && staked_nft.token_id == token_id) {
                 index = option::some(i);
                 break
@@ -1530,7 +1693,7 @@ module jungle_run::jungle_run {
         let resource_signer = &account::create_signer_with_capability(&contract_data.signer_cap);
         let token = object::address_to_object<Tokenv2>(token_id);
         object::transfer(resource_signer, token, user_address);
-        vector::remove(&mut contract_data.staked_nfts, option::extract(&mut index));
+        smart_vector::remove(&mut contract_data.staked_nfts, option::extract(&mut index));
 
         emit_event<UnstakeNFTEvent>(
             &mut contract_data.unstake_nft_event,
@@ -1561,7 +1724,8 @@ module jungle_run::jungle_run {
         let token = tokenv1::withdraw_token(staker, token_id, amount);
         tokenv1::deposit_token(resource_signer, token);
 
-        let reward_moves = *smart_table::borrow(&mut contract_data.whitelist_data, creator_address) * amount;
+        let whitelist_data = *smart_table::borrow(&mut contract_data.whitelist_data, creator_address) ;
+        let reward_moves = whitelist_data.extra_moves_on_staking * amount;
 
         let index = get_staked_nft_data(
             &contract_data.staked_v1_nfts,
@@ -1572,10 +1736,10 @@ module jungle_run::jungle_run {
             property_version
         );
         if (option::is_some(&index)) {
-            let staked_nft = vector::borrow_mut(&mut contract_data.staked_v1_nfts, option::extract(&mut index));
+            let staked_nft = smart_vector::borrow_mut(&mut contract_data.staked_v1_nfts, option::extract(&mut index));
             staked_nft.reward_moves = staked_nft.reward_moves + reward_moves;
             staked_nft.amount = staked_nft.amount + amount;
-        }else {
+        } else {
             let stake_v1_nft = StakedV1NFT {
                 staker: user_address,
                 creator_address,
@@ -1583,10 +1747,14 @@ module jungle_run::jungle_run {
                 token_name,
                 property_version,
                 reward_moves,
-                amount
+                amount,
+                points_earned: 0,
+                staking_time: timestamp::now_seconds(),
+                points_per_day: whitelist_data.points_per_day,
             };
-            vector::push_back(&mut contract_data.staked_v1_nfts, stake_v1_nft);
+            smart_vector::push_back(&mut contract_data.staked_v1_nfts, stake_v1_nft);
         };
+
 
         emit_event<StakeV1NFTEvent>(
             &mut contract_data.stake_v1_nft_event,
@@ -1597,7 +1765,9 @@ module jungle_run::jungle_run {
                 token_name,
                 property_version,
                 reward_moves,
-                amount
+                amount,
+                staking_time: timestamp::now_seconds(),
+                points_per_day: whitelist_data.points_per_day,
             }
         );
     }
@@ -1622,11 +1792,12 @@ module jungle_run::jungle_run {
         );
         assert!(option::is_some(&index), ERROR_NFT_NOT_STAKED);
         let staked_nft_index = option::extract(&mut index);
-        let staked_nft = vector::borrow_mut(&mut contract_data.staked_v1_nfts, staked_nft_index);
+        let staked_nft = smart_vector::borrow_mut(&mut contract_data.staked_v1_nfts, staked_nft_index);
 
         assert!(staked_nft.amount >= amount, ERROR_NFT_NOT_ENOUGH_AMOUNT);
 
-        let reward_moves = *smart_table::borrow(&mut contract_data.whitelist_data, creator_address) * amount;
+        let whitelist_data = *smart_table::borrow(&mut contract_data.whitelist_data, creator_address);
+        let reward_moves = whitelist_data.extra_moves_on_staking * amount;
 
         staked_nft.reward_moves = staked_nft.reward_moves - reward_moves;
         staked_nft.amount = staked_nft.amount - amount;
@@ -1638,7 +1809,7 @@ module jungle_run::jungle_run {
         tokenv1::deposit_token(staker, token);
 
         if (staked_nft.amount == 0) {
-            vector::remove(&mut contract_data.staked_v1_nfts, staked_nft_index);
+            smart_vector::remove(&mut contract_data.staked_v1_nfts, staked_nft_index);
         };
 
         emit_event<UnstakeV1NFTEvent>(
@@ -1854,7 +2025,7 @@ module jungle_run::jungle_run {
     #[view]
     public fun get_user(
         email: String
-    ): (address, address, address, String, u64, u64, u64, u64, u64, u64, vector<String>, vector<AvatarScore>) acquires ContractData {
+    ): (address, address, address, String, u64, u64, u64, u64, u64, u64, u64, vector<String>, vector<AvatarScore>) acquires ContractData {
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
 
         //check if user exists
@@ -1874,6 +2045,7 @@ module jungle_run::jungle_run {
             user_data.max_actions,
             user_data.last_cool_down_time,
             user_data.cool_down_timer,
+            user_data.total_points_earned,
             user_data.inventory,
             user_data.avatar_score
         )
@@ -1913,13 +2085,16 @@ module jungle_run::jungle_run {
     #[view]
     public fun get_staking_reward(
         user_adress: address,
-    ): (u64) acquires ContractData {
+    ): (u64, u64) acquires ContractData {
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
-        let staking_reward = get_staker_reward(&mut contract_data.staked_nfts, user_adress);
-        let staking_reward_v1 = get_staker_reward_v1(&mut contract_data.staked_v1_nfts, user_adress);
-
+        let (total_rewards, total_points) = get_staker_reward(&contract_data.staked_nfts, user_adress);
+        let (total_rewards_v1, total_points_v1) = get_staker_reward_v1(
+            &contract_data.staked_v1_nfts,
+            user_adress
+        );
         (
-            staking_reward + staking_reward_v1
+            total_rewards + total_rewards_v1,
+            total_points + total_points_v1
         )
     }
 
@@ -1928,8 +2103,8 @@ module jungle_run::jungle_run {
         user_adress: address,
     ): (vector<StakedNFT>, vector<StakedV1NFT>) acquires ContractData {
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
-        let user_nfts = get_staked_nft(&mut contract_data.staked_nfts, user_adress);
-        let user_nfts_v1 = get_staked_nft_v1(&mut contract_data.staked_v1_nfts, user_adress);
+        let user_nfts = get_staked_nft(smart_vector::to_vector(&contract_data.staked_nfts), user_adress);
+        let user_nfts_v1 = get_staked_nft_v1(smart_vector::to_vector(&contract_data.staked_v1_nfts), user_adress);
 
         (
             user_nfts, user_nfts_v1
@@ -1937,19 +2112,20 @@ module jungle_run::jungle_run {
     }
 
     #[view]
-    public fun get_whitelist_data(): (vector<address>, vector<address>) acquires ContractData {
+    public fun get_whitelist_data(): (vector<WhitelistData>, vector<WhitelistData>) acquires ContractData {
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
-        let collections = vector::empty<address>();
-        let creators = vector::empty<address>();
+        let collections = vector::empty<WhitelistData>();
+        let creators = vector::empty<WhitelistData>();
 
         let whitelist_data = smart_table::to_simple_map(&mut contract_data.whitelist_data);
         let whitelist_addresses = simple_map::keys(&mut whitelist_data);
 
         vector::for_each(whitelist_addresses, |whitelist_address| {
+            let data = *smart_table::borrow(&mut contract_data.whitelist_data, whitelist_address);
             if (object::object_exists<Collection>(whitelist_address)) {
-                vector::push_back(&mut collections, whitelist_address);
+                vector::push_back(&mut collections, data);
             }else {
-                vector::push_back(&mut creators, whitelist_address);
+                vector::push_back(&mut creators, data);
             }
         });
 
@@ -1966,6 +2142,32 @@ module jungle_run::jungle_run {
             coin::value(&pool_info.supply),
             pool_info.reward_amount,
             pool_info.image_url,
+        )
+    }
+
+    #[view]
+    public fun get_leaderboard(start_index: u64, end_index: u64): (vector<UserData>, u64) acquires ContractData {
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+
+        let users = smart_table::to_simple_map(&mut contract_data.users);
+        let user_values = simple_map::values(&mut users);
+
+
+        let sorted_leader_board = *sort_vector(&mut user_values);
+        (
+            vector::slice(&sorted_leader_board, start_index, end_index),
+            vector::length(&sorted_leader_board)
+        )
+    }
+
+    #[view]
+    public fun get_leaderboard_length(): ( u64) acquires ContractData {
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+        let users = smart_table::to_simple_map(&mut contract_data.users);
+        let user_values = simple_map::values(&mut users);
+
+        (
+            vector::length(&user_values)
         )
     }
 
@@ -1986,6 +2188,7 @@ module jungle_run::jungle_run {
             last_cool_down_time: user_data.last_cool_down_time,
             avatar_score: user_data.avatar_score,
             inventory: user_data.inventory,
+            total_points_earned: user_data.total_points_earned,
         }
     }
 
@@ -2169,83 +2372,69 @@ module jungle_run::jungle_run {
     }
 
     fun get_staked_nft(
-        staked_nfts: &vector<StakedNFT>,
+        staked_nfts: vector<StakedNFT>,
         staker_address: address
     ): vector<StakedNFT> {
         let user_nfts = vector::empty<StakedNFT>();
 
-        let len = vector::length(staked_nfts);
-        let i = 0;
-        while (i < len) {
-            let staked_nft = *vector::borrow(staked_nfts, i);
+        vector::for_each(staked_nfts, |staked_nft| {
             if (staked_nft.staker == staker_address) {
                 vector::push_back(&mut user_nfts, staked_nft);
-            };
-            i = i + 1;
-        };
+            }
+        });
 
         user_nfts
     }
 
     fun get_staked_nft_v1(
-        staked_v1_nfts: &vector<StakedV1NFT>,
+        staked_v1_nfts: vector<StakedV1NFT>,
         staker_address: address
     ): vector<StakedV1NFT> {
         let user_nfts = vector::empty<StakedV1NFT>();
 
-        let len = vector::length(staked_v1_nfts);
-        let i = 0;
-        while (i < len) {
-            let staked_nft = *vector::borrow(staked_v1_nfts, i);
+        vector::for_each(staked_v1_nfts, |staked_nft| {
             if (staked_nft.staker == staker_address) {
                 vector::push_back(&mut user_nfts, staked_nft);
-            };
-            i = i + 1;
-        };
+            }
+        });
 
         user_nfts
     }
 
     fun get_staker_reward(
-        staked_nfts: &vector<StakedNFT>,
+        staked_nfts: &SmartVector<StakedNFT>,
         staker_address: address
-    ): u64 {
+    ): (u64, u64) {
         let total_rewards: u64 = 0;
+        let total_points: u64 = 0;
 
-        let len = vector::length(staked_nfts);
-        let i = 0;
-        while (i < len) {
-            let staked_nft = vector::borrow(staked_nfts, i);
+        smart_vector::for_each_ref(staked_nfts, |staked_nft| {
             if (staked_nft.staker == staker_address) {
                 total_rewards = total_rewards + staked_nft.reward_moves;
-            };
-            i = i + 1;
-        };
+                total_points = total_points + staked_nft.points_earned;
+            }
+        });
 
-        total_rewards
+        (total_rewards, total_points)
     }
 
     fun get_staker_reward_v1(
-        staked_v1_nfts: &vector<StakedV1NFT>,
+        staked_v1_nfts: &SmartVector<StakedV1NFT>,
         staker_address: address
-    ): u64 {
+    ): (u64, u64) {
         let total_rewards: u64 = 0;
-
-        let len = vector::length(staked_v1_nfts);
-        let i = 0;
-        while (i < len) {
-            let staked_nft = vector::borrow(staked_v1_nfts, i);
+        let total_points: u64 = 0;
+        smart_vector::for_each_ref(staked_v1_nfts, |staked_nft| {
             if (staked_nft.staker == staker_address) {
                 total_rewards = total_rewards + staked_nft.reward_moves;
-            };
-            i = i + 1;
-        };
-
-        total_rewards
+                total_points = total_points + staked_nft.points_earned;
+            }
+        });
+        (total_rewards, total_points)
     }
 
     fun get_staked_nft_data(
-        staked_v1_nfts: &vector<StakedV1NFT>,
+        staked_v1_nfts: &SmartVector<StakedV1NFT>,
         user_address: address,
         creator_address: address,
         collection_name: String,
@@ -2253,10 +2442,10 @@ module jungle_run::jungle_run {
         property_version: u64
     ): ( Option<u64>) {
         let index = option::none<u64>();
-        let len = vector::length(staked_v1_nfts);
+        let len = smart_vector::length(staked_v1_nfts);
         let i = 0;
         while (i < len) {
-            let staked_nft = vector::borrow(staked_v1_nfts, i);
+            let staked_nft = smart_vector::borrow(staked_v1_nfts, i);
             if (staked_nft.staker == user_address
                 && staked_nft.creator_address == creator_address
                 && staked_nft.collection_name == collection_name
@@ -2275,10 +2464,8 @@ module jungle_run::jungle_run {
         let contract_data = borrow_global<ContractData>(RESOURCE_ACCOUNT);
 
         let all_valid = true;
-        let len = vector::length(&token_ids);
-        let i = 0;
-        while (i < len) {
-            let token_id = *vector::borrow(&token_ids, i);
+
+        vector::for_each(token_ids, |token_id| {
             let token = object::address_to_object<Tokenv2>(token_id);
             let collection = tokenv2::collection_object(token);
             let collection_address = object::object_address<Collection>(&collection);
@@ -2286,10 +2473,8 @@ module jungle_run::jungle_run {
             //check if all tokens belongs to whitelist collections
             if (!smart_table::contains(&contract_data.whitelist_data, collection_address)) {
                 all_valid = false;
-                break
-            };
-            i = i + 1;
-        };
+            }
+        });
 
         all_valid
     }
@@ -2304,12 +2489,12 @@ module jungle_run::jungle_run {
 
         let token_ids_len = vector::length(&token_ids);
         let i = 0;
-        let stake_nft_len = vector::length(&contract_data.staked_nfts);
+        let stake_nft_len = smart_vector::length(&contract_data.staked_nfts);
         while (i < token_ids_len) {
             let token_id = *vector::borrow(&token_ids, i);
             let j = 0;
             while (j < stake_nft_len) {
-                let staked_nft = *vector::borrow(&contract_data.staked_nfts, j);
+                let staked_nft = *smart_vector::borrow(&contract_data.staked_nfts, j);
                 if (staked_nft.token_id == token_id && staked_nft.staker == staker_address) {
                     simple_map::add(&mut staked_data, token_id, j);
                 };
@@ -2319,5 +2504,49 @@ module jungle_run::jungle_run {
         };
 
         (vector::length(&token_ids) == simple_map::length(&staked_data), staked_data)
+    }
+
+    fun get_leaderboard_data(
+        leaderboard_data: &vector<LeaderBoardData>,
+        staker: address,
+    ): ( Option<u64>) {
+        let index = option::none<u64>();
+        let len = vector::length(leaderboard_data);
+        let i = 0;
+        while (i < len) {
+            let data = vector::borrow(leaderboard_data, i);
+            if (data.staker == staker) {
+                index = option::some(i);
+                break
+            };
+            i = i + 1;
+        };
+
+        index
+    }
+
+    public fun sort_vector(v: &mut vector<UserData>): &mut vector<UserData> {
+        let len = vector::length(v);
+        let i = 0;
+
+        // Outer loop
+        while (i < len) {
+            let j = 0;
+
+            // Inner loop
+            while (j < len - i - 1) {
+                let a = *vector::borrow(v, j);
+                let b = *vector::borrow(v, j + 1);
+                if (a.total_points_earned < b.total_points_earned) {
+                    // Swap the elements
+                    vector::swap(v, j, j + 1);
+                };
+                j = j + 1;
+            };
+
+            i = i + 1;
+        };
+
+        v
     }
 }

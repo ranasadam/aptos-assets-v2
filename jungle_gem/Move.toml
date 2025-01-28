@@ -4,22 +4,22 @@ version = "1.0.0"
 authors = []
 
 [addresses]
-jungle_gem = "1060d33cb201470012fc4303df1ab05436dde1e1f490c3419a773d8deb16f5af"
+jungle_gem = "f7b0dbf827ef89e261539f6c6742ecf0268992b71a9a651c03d7742b1574bdb7"
 jungle_gem_default_admin = "62647058b3c06582fc3bbac4ace42d0bd1e1a21adbaf6a8e6d63d7ed7039be6b"
 jungle_gem_dev = "62647058b3c06582fc3bbac4ace42d0bd1e1a21adbaf6a8e6d63d7ed7039be6b"
 null_address = "0x0"
 
 [dependencies.AptosFramework]
-git = "https://github.com/aptos-labs/aptos-core.git"
+git = "https://github.com/aptos-labs/aptos-framework.git"
 rev = "mainnet"
-subdir = "aptos-move/framework/aptos-framework"
+subdir = "aptos-framework"
 
 [dependencies.AptosTokenObjects]
-git = "https://github.com/aptos-labs/aptos-core.git"
+git = "https://github.com/aptos-labs/aptos-framework.git"
 rev = "mainnet"
-subdir = "aptos-move/framework/aptos-token-objects"
+subdir = "aptos-token-objects"
 
 [dependencies.AptosToken]
-git = "https://github.com/aptos-labs/aptos-core.git"
+git = "https://github.com/aptos-labs/aptos-framework.git"
 rev = "mainnet"
-subdir = "aptos-move/framework/aptos-token"
+subdir = "aptos-token"

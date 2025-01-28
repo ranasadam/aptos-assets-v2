@@ -25,8 +25,6 @@ export const buildPackage = (dir: string, addrs?: string): Package => {
     '--save-metadata',
     '--package-dir',
     dir,
-    '--included-artifacts',
-    'none',
     ...named_addresses,
   ]);
   if (aptos.status !== 0) {

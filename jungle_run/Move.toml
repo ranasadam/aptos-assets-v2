@@ -5,20 +5,20 @@ authors = []
 upgrade_policy="compatible"
 
 [addresses]
-jungle_run = "5b2408062ba3e6eb421a61adea799fd206d075b11af611cb3ca59fc7ee5690c1"
+jungle_run = "25bba52f7b2d4db3f152ee89a9f753d91eb57dbf4b577a2a8f4b3fd7e4266575"
 jungle_run_default_admin = "223f1f3b1e75baeae0f4b4b5cd82840fcd81f76c11d9f9a60727bac22d4a298f"
 jungle_run_dev = "223f1f3b1e75baeae0f4b4b5cd82840fcd81f76c11d9f9a60727bac22d4a298f"
 null_address = "0x0"
 
 [dependencies.AptosFramework]
-git = "https://github.com/aptos-labs/aptos-core.git"
+git = "https://github.com/aptos-labs/aptos-framework.git"
 rev = "mainnet"
-subdir = "aptos-move/framework/aptos-framework"
+subdir = "aptos-framework"
 
 [dependencies.AptosTokenObjects]
-git = "https://github.com/aptos-labs/aptos-core.git"
+git = "https://github.com/aptos-labs/aptos-framework.git"
 rev = "mainnet"
-subdir = "aptos-move/framework/aptos-token-objects"
+subdir = "aptos-token-objects"
 
 [dependencies.AptosToken]
 git = "https://github.com/aptos-labs/aptos-framework.git"
