@@ -5,7 +5,7 @@ authors = []
 upgrade_policy="compatible"
 
 [addresses]
-jungle_run = "ba0a0d8df38a6d27b3fa63f9bcc6e5cf3fc09b086a27e64d5a1c2672e78afc3b"
+jungle_run = "3e07f874d2728ba64e2f39b6b46ead454007af2043c75a20ace4428536e2ab84"
 jungle_run_default_admin = "223f1f3b1e75baeae0f4b4b5cd82840fcd81f76c11d9f9a60727bac22d4a298f"
 jungle_run_dev = "223f1f3b1e75baeae0f4b4b5cd82840fcd81f76c11d9f9a60727bac22d4a298f"
 null_address = "0x0"

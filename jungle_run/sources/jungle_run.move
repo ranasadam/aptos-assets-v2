@@ -207,6 +207,7 @@ module jungle_run::jungle_run {
         address: address,
         extra_moves_on_staking: u64,
         points_per_day: u64,
+        points_earned: u64,
     }
 
     struct AvatarScore has copy, store, drop {
@@ -2450,11 +2451,13 @@ module jungle_run::jungle_run {
                     let reward = vector::borrow_mut(&mut v2_points, index);
                     reward.extra_moves_on_staking = reward.extra_moves_on_staking + staked_nft.reward_moves;
                     reward.points_per_day = reward.points_per_day + staked_nft.points_per_day;
+                    reward.points_earned = reward.points_earned + staked_nft.points_earned;
                 } else {
                     vector::push_back(&mut v2_points, StakingReward {
                         address: staked_nft.collection_address,
                         extra_moves_on_staking: staked_nft.reward_moves,
                         points_per_day: staked_nft.points_per_day,
+                        points_earned: staked_nft.points_earned
                     });
                 }
             }
@@ -2480,11 +2483,13 @@ module jungle_run::jungle_run {
                     let reward = vector::borrow_mut(&mut v1_points, index);
                     reward.extra_moves_on_staking = reward.extra_moves_on_staking + staked_nft.reward_moves;
                     reward.points_per_day = reward.points_per_day + (staked_nft.points_per_day * staked_nft.amount);
+                    reward.points_earned = reward.points_earned + staked_nft.points_earned;
                 } else {
                     vector::push_back(&mut v1_points, StakingReward {
                         address: staked_nft.creator_address,
                         extra_moves_on_staking: staked_nft.reward_moves,
                         points_per_day: staked_nft.points_per_day * staked_nft.amount,
+                        points_earned: staked_nft.points_earned,
                     });
                 }
             }
