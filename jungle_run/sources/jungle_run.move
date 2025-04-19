@@ -1448,14 +1448,25 @@ module jungle_run::jungle_run {
         user: &signer,
         email: String,
     ) acquires ContractData {
+        let signer_address = signer::address_of(user);
 
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
 
+        let users = smart_table::to_simple_map(&mut contract_data.users);
+        let user_values = simple_map::values(&mut users);
+        let email_address= string::utf8(b"");
+
+        vector::for_each(user_values, |user| {
+            if (signer_address == user.aptos_custodial_wallet || signer_address == user.aptos_wallet) {
+                email_address = user.email;
+            }
+        });
+
         //check if user exists
-        let is_already_exists = smart_table::contains(&contract_data.users, email);
+        let is_already_exists = smart_table::contains(&contract_data.users, email_address);
         assert!(is_already_exists, ERROR_USER_NOT_EXISTS);
 
-        let user_data = smart_table::borrow_mut(&mut contract_data.users, email);
+        let user_data = smart_table::borrow_mut(&mut contract_data.users, email_address);
         assert!(user_data.remaining_actions != 0, ERROR_ALL_ACTION_CONSUMED);
 
         user_data.remaining_actions = user_data.remaining_actions - 1;
