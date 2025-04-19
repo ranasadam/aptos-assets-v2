@@ -1448,8 +1448,6 @@ module jungle_run::jungle_run {
         user: &signer,
         email: String,
     ) acquires ContractData {
-        //check authentication of admin
-        authorize_only_admin(user);
 
         let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
 
