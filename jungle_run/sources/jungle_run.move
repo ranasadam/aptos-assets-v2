@@ -1482,6 +1482,49 @@ module jungle_run::jungle_run {
         );
     }
 
+    public entry fun consume_user_action_bulk(
+        user: &signer,
+        action_to_consume: u64
+    ) acquires ContractData {
+        let signer_address = signer::address_of(user);
+
+        let contract_data = borrow_global_mut<ContractData>(RESOURCE_ACCOUNT);
+
+        let users = smart_table::to_simple_map(&mut contract_data.users);
+        let user_values = simple_map::values(&mut users);
+        let email_address = string::utf8(b"");
+
+        vector::for_each(user_values, |user| {
+            if (signer_address == user.aptos_custodial_wallet || signer_address == user.aptos_wallet) {
+                email_address = user.email;
+            }
+        });
+
+        //check if user exists
+        let is_already_exists = smart_table::contains(&contract_data.users, email_address);
+        assert!(is_already_exists, ERROR_USER_NOT_EXISTS);
+
+        let user_data = smart_table::borrow_mut(&mut contract_data.users, email_address);
+        assert!(user_data.remaining_actions != 0, ERROR_ALL_ACTION_CONSUMED);
+
+        if (action_to_consume >= user_data.remaining_actions) {
+            user_data.remaining_actions = 0;
+        }else {
+            user_data.remaining_actions = user_data.remaining_actions - action_to_consume;
+        };
+
+        if (user_data.remaining_actions == 0) {
+            user_data.last_cool_down_time = timestamp::now_seconds();
+        };
+
+        emit_event<UpdateUserEvent>(
+            &mut contract_data.user_updated_event,
+            UpdateUserEvent {
+                user_data: create(user_data)
+            }
+        );
+    }
+
     public entry fun update_user_action(
         user: &signer,
         email: String,
